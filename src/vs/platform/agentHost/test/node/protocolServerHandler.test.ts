@@ -1920,7 +1920,8 @@ suite('ProtocolServerHandler', () => {
 		};
 		agentService.sessionCanvases = [{
 			canvasId: 'preview',
-			extensionId: 'user:preview',
+			extensionId: 'opaque-provider',
+			extensionSource: 'plugin',
 			extensionName: 'Preview',
 			displayName: 'Preview Canvas',
 			description: 'Interactive preview.',
