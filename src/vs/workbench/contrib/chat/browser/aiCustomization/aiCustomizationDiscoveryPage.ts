@@ -29,7 +29,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { CustomizationMarketplaceMediaType, getCustomizationMarketplaceResourceKey, ICustomizationMarketplaceCursor, ICustomizationMarketplaceResource, ICustomizationMarketplaceService, ICustomizationMarketplaceSourceError, ICustomizationMarketplaceSourceInfo } from '../../../../../platform/customizationMarketplace/common/customizationMarketplaceService.js';
+import { CustomizationMarketplaceMediaType, getCustomizationMarketplaceResourceKey, ICustomizationMarketplaceCursor, ICustomizationMarketplaceResource, ICustomizationMarketplaceService, ICustomizationMarketplaceSourceError, ICustomizationMarketplaceSourceInfo, isCustomizationMarketplaceCanvasOnlyResource, isCustomizationMarketplaceCanvasResource } from '../../../../../platform/customizationMarketplace/common/customizationMarketplaceService.js';
 import { affectsCustomizationMarketplaceSources, CustomizationMarketplaceSources, getVisibleCustomizationMarketplaceSources } from '../../../../../platform/customizationMarketplace/common/customizationMarketplaceSources.js';
 import { IConfigurationChangeEvent, IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
@@ -87,7 +87,7 @@ const searchInputHeight = 20;
 const firstPartyPublishers = new Set(['azure', 'azure-samples', 'github', 'microsoft', 'microsoftdocs']);
 const firstPartyMcpNamespaces = new Set(['azure', 'azure-ai-foundry', 'com.microsoft', 'io.github.azure', 'io.github.azure-samples', 'io.github.github', 'io.github.microsoft', 'io.github.microsoftdocs']);
 
-type DiscoveryItemType = 'agent' | 'skill' | 'instructions' | 'prompt' | 'hook' | 'mcp' | 'plugin';
+type DiscoveryItemType = 'agent' | 'skill' | 'instructions' | 'prompt' | 'hook' | 'mcp' | 'plugin' | 'canvas';
 
 function isFirstPartyBrowseItem(resource: ICustomizationMarketplaceResource): boolean {
 	if (resource.publisher && firstPartyPublishers.has(resource.publisher.toLowerCase())) {
@@ -203,26 +203,28 @@ function getTypeLabel(type: DiscoveryItemType): string {
 		case 'hook': return localize('customizationDiscovery.hook', "Hook");
 		case 'mcp': return localize('customizationDiscovery.mcp', "MCP server");
 		case 'plugin': return localize('customizationDiscovery.plugin', "Plugin");
+		case 'canvas': return localize('customizationDiscovery.canvas', "Canvas");
 	}
 }
 
-function getCatalogType(resource: ICustomizationMarketplaceResource): 'skill' | 'mcp' | 'plugin' | undefined {
+function getCatalogType(resource: ICustomizationMarketplaceResource): 'skill' | 'mcp' | 'plugin' | 'canvas' | undefined {
 	switch (resource.mediaType) {
 		case CustomizationMarketplaceMediaType.Skill: return 'skill';
 		case CustomizationMarketplaceMediaType.McpServer: return 'mcp';
 		case CustomizationMarketplaceMediaType.CopilotPlugin:
 		case CustomizationMarketplaceMediaType.ClaudePlugin:
-			return 'plugin';
+			return isCustomizationMarketplaceCanvasOnlyResource(resource) ? 'canvas' : 'plugin';
 		default:
 			return undefined;
 	}
 }
 
-function getSectionForCatalogType(type: 'skill' | 'mcp' | 'plugin'): AICustomizationManagementSection {
+function getSectionForCatalogType(type: 'skill' | 'mcp' | 'plugin' | 'canvas'): AICustomizationManagementSection {
 	switch (type) {
 		case 'skill': return AICustomizationManagementSection.Skills;
 		case 'mcp': return AICustomizationManagementSection.McpServers;
 		case 'plugin': return AICustomizationManagementSection.Plugins;
+		case 'canvas': return AICustomizationManagementSection.Canvases;
 	}
 }
 
@@ -253,6 +255,8 @@ function getInstalledItemMarketplaceRecord(
 		case 'skill':
 		case 'plugin':
 			return item.uri ? installations.findByTarget({ kind: item.type, uri: item.uri }) : undefined;
+		case 'canvas':
+			return item.uri ? installations.findByTarget({ kind: 'plugin', uri: item.uri }) : undefined;
 		case 'mcp':
 			return item.mcpServerId ? installations.findByTarget({ kind: 'mcp', id: item.mcpServerId }) : undefined;
 		default:
@@ -495,6 +499,9 @@ function getCatalogMediaType(types: ReadonlySet<CustomizationDiscoveryType>): Cu
 	if (types.has('mcp')) {
 		return CustomizationMarketplaceMediaType.McpServer;
 	}
+	if (types.has('canvas')) {
+		return CustomizationMarketplaceMediaType.CopilotPlugin;
+	}
 	return undefined;
 }
 
@@ -613,7 +620,7 @@ class DiscoveryResultRenderer implements IListRenderer<DiscoveryListEntry, IDisc
 
 		renderCustomizationMarketplaceIcon(
 			templateData.icon,
-			type === 'mcp' ? Codicon.server : type === 'plugin' ? Codicon.extensions : type === 'skill' ? Codicon.lightbulb : Codicon.file,
+			type === 'mcp' ? Codicon.server : type === 'plugin' ? Codicon.extensions : type === 'canvas' ? Codicon.preview : type === 'skill' ? Codicon.lightbulb : Codicon.file,
 			resource?.icon,
 			this.themeService.getColorTheme().type,
 			templateData.elementDisposables,
@@ -1248,10 +1255,26 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 		));
 		skills.checked = this.query.types.has('skill');
 
+		const canvases = this.searchActionDisposables.add(new Action(
+			'customizationDiscovery.filter.canvas',
+			localize('customizationDiscovery.filterCanvases', "Canvases"),
+			undefined,
+			true,
+			() => this.setQuery(this.query.withType('canvas', !this.query.types.has('canvas'))),
+		));
+		canvases.checked = this.query.types.has('canvas');
+
 		actions.push(new SubmenuAction(
 			'customizationDiscovery.filter',
 			localize('customizationDiscovery.filter', "Filter Customizations..."),
-			[installed, new Separator(), mcp, plugins, skills],
+			[
+				installed,
+				new Separator(),
+				mcp,
+				plugins,
+				skills,
+				...(this.visibleSectionIds.has(AICustomizationManagementSection.Canvases) ? [canvases] : []),
+			],
 			ThemeIcon.asClassName(Codicon.filter),
 		));
 		this.searchToolbar.setActions(actions);
@@ -1422,7 +1445,17 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 		}
 		return type === 'skill' && this.query.types.has('skill')
 			|| type === 'mcp' && this.query.types.has('mcp')
-			|| type === 'plugin' && this.query.types.has('plugin');
+			|| type === 'plugin' && this.query.types.has('plugin')
+			|| type === 'canvas' && this.query.types.has('canvas');
+	}
+
+	private matchesCatalogResource(resource: ICustomizationMarketplaceResource): boolean {
+		if (this.query.types.size === 0) {
+			return true;
+		}
+		const type = getCatalogType(resource);
+		return (type !== undefined && this.matchesType(type))
+			|| (this.query.types.has('canvas') && isCustomizationMarketplaceCanvasResource(resource));
 	}
 
 	private shouldQueryCatalog(): boolean {
@@ -1489,7 +1522,8 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 		this.render(true);
 
 		try {
-			const backfill = !this.query.isEmpty() && this.query.types.size > 0 && getCatalogMediaType(this.query.types) === undefined;
+			const backfill = !this.query.isEmpty() && this.query.types.size > 0
+				&& (getCatalogMediaType(this.query.types) === undefined || this.query.types.has('canvas'));
 			let hasMatchingCatalogItem = false;
 			for (let pageCount = 0; pageCount < (backfill ? maxFilteredCatalogPagesPerLoad : 1); pageCount++) {
 				const page = await this.marketplaceService.query({
@@ -1520,8 +1554,7 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 					return true;
 				});
 				hasMatchingCatalogItem = this.catalogItems.some(item => {
-					const type = getCatalogType(item);
-					return type !== undefined && this.matchesType(type);
+					return this.matchesCatalogResource(item);
 				});
 				append = true;
 				if (!backfill || !page.nextCursor || hasMatchingCatalogItem) {
@@ -1560,8 +1593,7 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 
 	private hasMatchingCatalogItems(): boolean {
 		return this.catalogItems.some(item => {
-			const type = getCatalogType(item);
-			return type !== undefined && this.matchesType(type);
+			return this.matchesCatalogResource(item);
 		});
 	}
 
@@ -1629,7 +1661,7 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 		const matching = [...resources.values()].filter(resource => {
 			const type = getCatalogType(resource);
 			return !!type
-				&& this.matchesType(type)
+				&& this.matchesCatalogResource(resource)
 				&& (!this.selectedSourceId || resource.sourceId === this.selectedSourceId)
 				&& (!query || [resource.displayName, resource.description, getTypeLabel(type), this.getMarketplaceSourceLabel(resource.sourceId)].some(value => normalizedName(value).includes(query)));
 		});
@@ -1663,6 +1695,7 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 						catalogResource: resource,
 						linkedConnectionRole,
 						alternativeExpanded: linkedConnectionRole === 'alternative' && this.isAlternativeExpanded(resource),
+						type,
 					});
 				} else {
 					marketplaceEntries.push({
@@ -1781,12 +1814,17 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 			{ type: 'skill', label: localize('customizationDiscovery.skillsSection', "Skills") },
 			{ type: 'mcp', label: localize('customizationDiscovery.mcpsSection', "MCP servers") },
 			{ type: 'plugin', label: localize('customizationDiscovery.pluginsSection', "Plugins") },
+			...(this.visibleSectionIds.has(AICustomizationManagementSection.Canvases)
+				? [{ type: 'canvas' as const, label: localize('customizationDiscovery.canvasesSection', "Canvases") }]
+				: []),
 		];
 		const remainingGroups = groupPrioritizedMarketplaceResources(prioritizedResources)
 			.filter(group => group.every(({ resource }) => !leadingIds.has(getCustomizationMarketplaceResourceKey(resource))));
 		for (const group of groups) {
 			const items = remainingGroups
-				.filter(items => getCatalogType(items[0].resource) === group.type)
+				.filter(items => group.type === 'canvas'
+					? isCustomizationMarketplaceCanvasResource(items[0].resource)
+					: getCatalogType(items[0].resource) === group.type)
 				.slice(0, leadingBrowseItemCount)
 				.flat();
 			if (items.length) {
@@ -1895,7 +1933,7 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 		const type = getCatalogType(item);
 		renderCustomizationMarketplaceIcon(
 			icon,
-			type === 'mcp' ? Codicon.server : type === 'plugin' ? Codicon.extensions : Codicon.lightbulb,
+			type === 'mcp' ? Codicon.server : type === 'plugin' ? Codicon.extensions : type === 'canvas' ? Codicon.preview : Codicon.lightbulb,
 			item.icon,
 			this.themeService.getColorTheme().type,
 			this.browseDisposables,
@@ -2282,6 +2320,8 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 
 	rebuildCards(visibleSectionIds: ReadonlySet<AICustomizationManagementSection>): void {
 		this.visibleSectionIds = new Set(visibleSectionIds);
+		this.updateDescription();
+		this.updateSearchActions();
 		this.refreshInstalledItems();
 	}
 
