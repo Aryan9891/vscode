@@ -224,7 +224,7 @@ function getSectionForCatalogType(type: 'skill' | 'mcp' | 'plugin' | 'canvas'): 
 		case 'skill': return AICustomizationManagementSection.Skills;
 		case 'mcp': return AICustomizationManagementSection.McpServers;
 		case 'plugin': return AICustomizationManagementSection.Plugins;
-		case 'canvas': return AICustomizationManagementSection.Canvases;
+		case 'canvas': return AICustomizationManagementSection.Plugins;
 	}
 }
 
@@ -2429,8 +2429,7 @@ export class AICustomizationDiscoveryPage extends Disposable implements IAICusto
 			return !marketplace || !recordedInstallations.has(marketplace);
 		});
 		const available = visibleSearchResources.filter(({ resource }) => {
-			const type = getCatalogType(resource);
-			return type && this.matchesType(type) && !hasInstallationTarget(this.getInstallState(resource));
+			return this.matchesCatalogResource(resource) && !hasInstallationTarget(this.getInstallState(resource));
 		});
 		return [
 			localize('customizationDiscovery.title', "Browse customizations"),
