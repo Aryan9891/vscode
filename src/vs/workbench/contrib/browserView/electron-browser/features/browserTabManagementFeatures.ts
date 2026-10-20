@@ -591,8 +591,8 @@ class BrowserEditorOpenContextKeyContribution extends Disposable implements IWor
 registerWorkbenchContribution2(BrowserEditorOpenContextKeyContribution.ID, BrowserEditorOpenContextKeyContribution, WorkbenchPhase.AfterRestored);
 
 /**
- * Offers the Integrated Browser as an external URI opener. It is preferred for localhost URLs and
- * all-interfaces URLs when the setting is enabled.
+ * Offers the Integrated Browser as an external URI opener for http(s) links. It is preferred for
+ * localhost URLs and all-interfaces URLs when the setting is enabled.
  */
 export class LocalhostLinkOpenerContribution extends Disposable implements IWorkbenchContribution, IExternalOpenerProvider {
 	static readonly ID = 'workbench.contrib.localhostLinkOpener';
@@ -601,7 +601,7 @@ export class LocalhostLinkOpenerContribution extends Disposable implements IWork
 	private readonly _opener: IExternalUriOpener = {
 		id: LocalhostLinkOpenerContribution.OPENER_ID,
 		label: localize('browser.externalUriOpener', "Open in Integrated Browser"),
-		canOpen: async uri => this.opensByDefault(uri) ? ExternalUriOpenerPriority.Preferred : ExternalUriOpenerPriority.None,
+		canOpen: async uri => this.opensByDefault(uri) ? ExternalUriOpenerPriority.Preferred : ExternalUriOpenerPriority.Option,
 		openExternalUri: (href, ctx) => this.open(href, ctx),
 	};
 

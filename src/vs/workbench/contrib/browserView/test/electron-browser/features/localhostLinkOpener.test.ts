@@ -42,7 +42,7 @@ suite('Localhost Link Opener', () => {
 		return { contribution, opener: openers[0], opened };
 	}
 
-	test('is preferred for localhost links when enabled, and never offered for other schemes', async () => {
+	test('is preferred for localhost links when enabled, an option for other web links, and never offered for other schemes', async () => {
 		const enabled = await createOpener(true);
 		const disabled = await createOpener(false);
 		const priority = (opener: IExternalUriOpener, uri: string) => opener.canOpen(URI.parse(uri), CancellationToken.None);
@@ -57,8 +57,8 @@ suite('Localhost Link Opener', () => {
 		}, {
 			enabledLocalhost: ExternalUriOpenerPriority.Preferred,
 			enabledAllInterfaces: ExternalUriOpenerPriority.Preferred,
-			enabledWeb: ExternalUriOpenerPriority.None,
-			disabledLocalhost: ExternalUriOpenerPriority.None,
+			enabledWeb: ExternalUriOpenerPriority.Option,
+			disabledLocalhost: ExternalUriOpenerPriority.Option,
 			upperCaseSchemeOpeners: 1,
 			fileOpeners: 0,
 		});

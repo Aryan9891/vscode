@@ -15,7 +15,7 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { ViewColumn } from '../../../../platform/editor/common/editor.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
-import { IExternalOpener, IOpenerService } from '../../../../platform/opener/common/opener.js';
+import { IExternalOpener, IOpenerService, OpenInternalOptions } from '../../../../platform/opener/common/opener.js';
 import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../../../platform/quickinput/common/quickInput.js';
 import { defaultExternalUriOpenerId, ExternalUriOpenersConfiguration, externalUriOpenersSettingId } from './configuration.js';
 import { testUrlMatchesGlob } from '../../../../platform/url/common/urlGlob.js';
@@ -55,6 +55,30 @@ export interface IExternalUriOpenerService {
 	 * If there is no opener configured, then returns the best opener that can handle the uri.
 	 */
 	getOpener(uri: URI, ctx: { sourceUri: URI }, token: CancellationToken): Promise<IExternalUriOpener | undefined>;
+
+	/**
+	 * Returns the ways to open a link, so that the user can choose one: the openers that can open
+	 * it and the editor's default opener. The one that opening the link without choosing uses comes
+	 * first; there is none if opening it prompts. Returns no handlers for links that no opener supports.
+	 *
+	 * @param href The link as written.
+	 */
+	getLinkHandlers(href: string, token: CancellationToken): Promise<readonly ILinkHandler[]>;
+}
+
+/**
+ * A way to open a link, such as an external URI opener.
+ */
+export interface ILinkHandler {
+	readonly id: string;
+	readonly label: string;
+
+	/**
+	 * Whether opening the link without choosing a handler uses this handler.
+	 */
+	readonly isDefault: boolean;
+
+	open(options?: OpenInternalOptions): Promise<boolean>;
 }
 
 interface IValidOpener {
@@ -66,18 +90,25 @@ interface IValidOpener {
  * What opening a uri without choosing an opener uses: an opener, the editor's default opener, or a
  * prompt to choose between the openers.
  *
- * The first preferred opener wins. If all openers are optional, the default opener wins.
- * Otherwise a single opener wins, and several prompt.
+ * The first preferred opener wins. Otherwise a single opener of `Default` priority wins, and several
+ * prompt. Optional openers never win or prompt on their own.
  */
 function chooseOpener(validOpeners: readonly IValidOpener[]): IExternalUriOpener | typeof defaultExternalUriOpenerId | 'prompt' {
 	const best = validOpeners.at(0);
-	if (!best || best.priority === languages.ExternalUriOpenerPriority.Option) {
-		return defaultExternalUriOpenerId;
-	}
-	if (best.priority === languages.ExternalUriOpenerPriority.Preferred || validOpeners.length === 1) {
+	if (best?.priority === languages.ExternalUriOpenerPriority.Preferred) {
 		return best.opener;
 	}
-	return 'prompt';
+	const defaultPriorityOpeners = validOpeners.filter(value => value.priority === languages.ExternalUriOpenerPriority.Default);
+	if (defaultPriorityOpeners.length === 0) {
+		return defaultExternalUriOpenerId;
+	}
+	return defaultPriorityOpeners.length === 1 ? defaultPriorityOpeners[0].opener : 'prompt';
+}
+
+function getDefaultOpenerLabel(): string {
+	return isWeb
+		? nls.localize('selectOpenerDefaultLabel.web', 'Open in new browser window')
+		: nls.localize('selectOpenerDefaultLabel', 'Open in default browser');
 }
 
 export class ExternalUriOpenerService extends Disposable implements IExternalUriOpenerService, IExternalOpener {
@@ -87,7 +118,7 @@ export class ExternalUriOpenerService extends Disposable implements IExternalUri
 	private readonly _providers = new LinkedList<IExternalOpenerProvider>();
 
 	constructor(
-		@IOpenerService openerService: IOpenerService,
+		@IOpenerService private readonly openerService: IOpenerService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ILogService private readonly logService: ILogService,
 		@IPreferencesService private readonly preferencesService: IPreferencesService,
@@ -129,6 +160,34 @@ export class ExternalUriOpenerService extends Disposable implements IExternalUri
 			return requestedOpener === defaultExternalUriOpenerId ? undefined : requestedOpener;
 		}
 		return (await this.getValidOpeners(allOpeners, ctx.sourceUri, token)).at(0)?.opener;
+	}
+
+	async getLinkHandlers(href: string, token: CancellationToken): Promise<readonly ILinkHandler[]> {
+		const targetUri = URI.parse(href);
+		const allOpeners = await this.getAllOpenersForUri(targetUri);
+		if (allOpeners.size === 0) {
+			return [];
+		}
+
+		const validOpeners = await this.getValidOpeners(allOpeners, targetUri, token);
+		const requestedOpener = this.getRequestedOpener(allOpeners, targetUri, undefined);
+		const choice = requestedOpener ?? chooseOpener(validOpeners);
+		const defaultHandlerId = choice === 'prompt' ? undefined : choice === defaultExternalUriOpenerId ? choice : choice.id;
+		const openers = validOpeners.map(value => value.opener);
+		if (requestedOpener && requestedOpener !== defaultExternalUriOpenerId && !openers.includes(requestedOpener)) {
+			openers.unshift(requestedOpener);
+		}
+
+		const handlers = [
+			...openers.map(opener => ({ id: opener.id, label: opener.label })),
+			{ id: defaultExternalUriOpenerId, label: getDefaultOpenerLabel() },
+		].map(({ id, label }): ILinkHandler => ({
+			id,
+			label,
+			isDefault: id === defaultHandlerId,
+			open: options => this.openerService.open(href, { ...options, allowContributedOpeners: id }),
+		}));
+		return [...handlers.filter(handler => handler.isDefault), ...handlers.filter(handler => !handler.isDefault)];
 	}
 
 	/**
@@ -199,9 +258,7 @@ export class ExternalUriOpenerService extends Disposable implements IExternalUri
 		});
 		items.push(
 			{
-				label: isWeb
-					? nls.localize('selectOpenerDefaultLabel.web', 'Open in new browser window')
-					: nls.localize('selectOpenerDefaultLabel', 'Open in default browser'),
+				label: getDefaultOpenerLabel(),
 				opener: undefined
 			},
 			{ type: 'separator' },
