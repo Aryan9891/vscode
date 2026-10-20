@@ -135,4 +135,62 @@ suite('ExternalUriOpenerService', () => {
 		assert.strictEqual(didOpen, true);
 		assert.strictEqual(openedWithPreferred, true);
 	});
+
+	test('Should prefer requested and configured openers, and pass the link as written', async () => {
+		const configurationService = new TestConfigurationService();
+		instantiationService.stub(IConfigurationService, configurationService);
+		instantiationService.stub(IQuickInputService, new MockQuickInputService(0));
+		const href = 'http://contoso.com/search?q=a%26b';
+
+		const open = async (priorities: Record<string, ExternalUriOpenerPriority>, preferredOpenerId?: string) => {
+			const opened: string[] = [];
+			const externalUriOpenerService = disposables.add(instantiationService.createInstance(ExternalUriOpenerService));
+			disposables.add(externalUriOpenerService.registerExternalOpenerProvider(new class implements IExternalOpenerProvider {
+				async *getOpeners(_targetUri: URI): AsyncGenerator<IExternalUriOpener> {
+					for (const [id, priority] of Object.entries(priorities)) {
+						yield { id, label: id, canOpen: async () => priority, openExternalUri: async openedHref => { opened.push(`${id}:${openedHref}`); return true; } };
+					}
+				}
+			}));
+			const didOpen = await externalUriOpenerService.openExternal(href, { sourceUri: URI.parse(href), preferredOpenerId }, CancellationToken.None);
+			return { didOpen, opened };
+		};
+
+		const results = {
+			onlyOptional: await open({ a: ExternalUriOpenerPriority.Option, b: ExternalUriOpenerPriority.Option }),
+			singleDefault: await open({ a: ExternalUriOpenerPriority.None, b: ExternalUriOpenerPriority.Default }),
+			defaultAndOptionalPromptsBestFirst: await open({ a: ExternalUriOpenerPriority.Option, b: ExternalUriOpenerPriority.Default }),
+			firstOfSeveralPreferred: await open({ a: ExternalUriOpenerPriority.Preferred, b: ExternalUriOpenerPriority.Preferred }),
+			requestedDisabled: await open({ a: ExternalUriOpenerPriority.Preferred, b: ExternalUriOpenerPriority.None }, 'b'),
+			requestedDefault: await open({ a: ExternalUriOpenerPriority.Preferred }, 'default'),
+			requestedUnknown: await open({ a: ExternalUriOpenerPriority.Preferred }, 'unknown'),
+		};
+		await configurationService.setUserConfiguration('workbench.externalUriOpeners', { 'contoso.com': 'b' });
+		const configured = await open({ a: ExternalUriOpenerPriority.Preferred, b: ExternalUriOpenerPriority.None });
+
+		assert.deepStrictEqual({ ...results, configured }, {
+			onlyOptional: { didOpen: false, opened: [] },
+			singleDefault: { didOpen: true, opened: [`b:${href}`] },
+			defaultAndOptionalPromptsBestFirst: { didOpen: true, opened: [`b:${href}`] },
+			firstOfSeveralPreferred: { didOpen: true, opened: [`a:${href}`] },
+			requestedDisabled: { didOpen: true, opened: [`b:${href}`] },
+			requestedDefault: { didOpen: false, opened: [] },
+			requestedUnknown: { didOpen: true, opened: [`a:${href}`] },
+			configured: { didOpen: true, opened: [`b:${href}`] },
+		});
+	});
+
+	test('Should get the requested or best opener, including optional ones', async () => {
+		const externalUriOpenerService = disposables.add(instantiationService.createInstance(ExternalUriOpenerService));
+		disposables.add(externalUriOpenerService.registerExternalOpenerProvider(new class implements IExternalOpenerProvider {
+			async *getOpeners(_targetUri: URI): AsyncGenerator<IExternalUriOpener> {
+				yield { id: 'optional', label: 'optional', canOpen: async () => ExternalUriOpenerPriority.Option, openExternalUri: async () => true };
+				yield { id: 'enabled', label: 'enabled', canOpen: async () => ExternalUriOpenerPriority.Default, openExternalUri: async () => true };
+			}
+		}));
+
+		const uri = URI.parse('http://contoso.com');
+		const opener = await externalUriOpenerService.getOpener(uri, { sourceUri: uri }, CancellationToken.None);
+		assert.strictEqual(opener?.id, 'enabled');
+	});
 });

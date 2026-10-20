@@ -1314,7 +1314,7 @@ export namespace OpenPortInPreviewAction {
 			const sourceUri = URI.parse(`http://${remoteHost}:${tunnel.remotePort}`);
 			const opener = await externalOpenerService.getOpener(tunnel.localUri, { sourceUri }, CancellationToken.None);
 			if (opener) {
-				return opener.openExternalUri(tunnel.localUri, { sourceUri }, CancellationToken.None);
+				return opener.openExternalUri(tunnel.localUri.toString(), { sourceUri }, CancellationToken.None);
 			}
 			return openerService.open(tunnel.localUri);
 		}
