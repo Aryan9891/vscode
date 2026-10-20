@@ -52,12 +52,14 @@ suite('Localhost Link Opener', () => {
 			enabledAllInterfaces: await priority(enabled.opener, 'http://0.0.0.0:3000'),
 			enabledWeb: await priority(enabled.opener, 'https://example.com'),
 			disabledLocalhost: await priority(disabled.opener, 'http://localhost:3000/app'),
+			upperCaseSchemeOpeners: (await Iterable.asyncToArray(enabled.contribution.getOpeners(URI.parse('HTTP://localhost:3000')))).length,
 			fileOpeners: (await Iterable.asyncToArray(enabled.contribution.getOpeners(URI.file('/workspace/index.html')))).length,
 		}, {
 			enabledLocalhost: ExternalUriOpenerPriority.Preferred,
 			enabledAllInterfaces: ExternalUriOpenerPriority.Preferred,
 			enabledWeb: ExternalUriOpenerPriority.None,
 			disabledLocalhost: ExternalUriOpenerPriority.None,
+			upperCaseSchemeOpeners: 1,
 			fileOpeners: 0,
 		});
 	});

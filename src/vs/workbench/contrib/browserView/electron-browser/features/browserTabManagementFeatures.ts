@@ -46,7 +46,7 @@ import { IPreferencesService } from '../../../../services/preferences/common/pre
 import { disposableTimeout } from '../../../../../base/common/async.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { IsSessionsWindowContext, ResourceContextKey } from '../../../../common/contextkeys.js';
-import { Schemas } from '../../../../../base/common/network.js';
+import { matchesSomeScheme, Schemas } from '../../../../../base/common/network.js';
 import { BrowserNavigationFeatures } from './browserNavigationFeatures.js';
 import { ViewColumn } from '../../../../../platform/editor/common/editor.js';
 
@@ -618,7 +618,7 @@ export class LocalhostLinkOpenerContribution extends Disposable implements IWork
 	}
 
 	async *getOpeners(targetUri: URI): AsyncIterable<IExternalUriOpener> {
-		if (targetUri.scheme === Schemas.http || targetUri.scheme === Schemas.https) {
+		if (matchesSomeScheme(targetUri, Schemas.http, Schemas.https)) {
 			yield this._opener;
 		}
 	}
