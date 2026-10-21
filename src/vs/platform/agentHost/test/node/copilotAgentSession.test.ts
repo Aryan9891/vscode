@@ -3520,6 +3520,14 @@ suite('CopilotAgentSession', () => {
 					description: 'Preview with optional input.',
 					inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
 				});
+				mock.extensions.push({ id: 'session:test-session-1:session-preview', name: 'Session Preview', source: 'session', status: 'running' });
+				mock.canvases.push({
+					canvasId: 'session-preview',
+					extensionId: 'session:session-preview',
+					extensionName: 'Session Preview',
+					displayName: 'Session Preview',
+					description: 'Preview scoped to this session.',
+				});
 			},
 		});
 
@@ -3550,6 +3558,15 @@ suite('CopilotAgentSession', () => {
 				extensionName: 'Preview extension',
 				displayName: 'Optional Preview',
 				description: 'Preview with optional input.',
+				requiresInput: false,
+				actionCount: 0,
+			}, {
+				canvasId: 'session-preview',
+				extensionId: 'session:session-preview',
+				extensionSource: 'session',
+				extensionName: 'Session Preview',
+				displayName: 'Session Preview',
+				description: 'Preview scoped to this session.',
 				requiresInput: false,
 				actionCount: 0,
 			}],
